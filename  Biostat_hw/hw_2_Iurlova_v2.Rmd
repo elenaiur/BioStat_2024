@@ -1,0 +1,164 @@
+---
+title: "Estimation of mean and SE"
+author: "E_Iurlova"
+date: "10.10.2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+
+```
+
+## Модель пациента: исследование исхода заболевания (полного выздоровления)
+
+```{r pressure, echo=FALSE}
+
+values <- 0:1 # Значения, которые может принимать исход (случайная величина)
+max_val <- max(values) # Максимальное значение случайной величины
+Pr_1 <-  0.3  # Вероятность полного выздоровления (p) - ИСТИННАЯ р
+Pr <-  c (1- Pr_1, Pr_1) #вероятности 2 бинарных исходов
+
+
+df <- data.frame(values, Pr)
+
+ggplot(df, aes(x=values, y=Pr)) +
+  geom_point() + 
+  geom_segment( aes(x=values, xend=values, y=0, yend=Pr)) +
+  scale_x_continuous(breaks = values) +
+  theme_bw()
+
+```
+## Характеристики вероятности события
+
+```{r characteristics}
+
+true_mean <- Pr_1  # Истинное среднее (математическое ожидание) - p
+
+print(true_mean)
+
+variance <- Pr_1* (1-Pr_1) # Дисперсия
+
+print(variance)
+
+standard_deviation <- sqrt(variance)
+
+print(standard_deviation)
+
+```
+## Однократная оценка по выборке
+
+```{r sample_1}
+
+n_patients <- 100 # РАЗМЕР ВЫБОРКИ
+
+group_heal <- round(rbinom(n_patients,1,Pr_1), 0) # Результаты по выборке
+
+print(group_heal)
+
+sample_mean <- mean(group_heal)
+
+print(sample_mean)
+
+```
+
+## Набираем статистику
+
+```{r sample_n}
+
+n_patients <- 100 # РАЗМЕР ВЫБОРКИ
+
+n_repeats <- 1000 # Количество повторений эксперимента
+
+df_all_repeats <- data.frame(
+  n_exp = rep(1:n_repeats, each = n_patients),
+  ID =  rep(1:n_patients, n_repeats),
+  heal = round(rbinom(n_repeats*n_patients,1,Pr_1), 0)
+)
+
+```
+
+## Оценка среднего в каждом эксперименте
+
+```{r estimations}
+
+df_sample_mean <- df_all_repeats %>% 
+  group_by(n_exp) %>% 
+  dplyr::summarise(mean_heal = mean(heal)) %>% 
+  ungroup()
+
+ggplot(df_sample_mean, aes(x = mean_heal)) +
+  geom_histogram(color = 'black', fill = 'white', binwidth = 0.05) +
+  theme_bw()
+
+```
+
+## Количественные и качественные итоги
+
+```{r conclusions}
+
+error <- sqrt( mean((df_sample_mean$mean_heal-true_mean)^2) )
+print(error)
+
+```
+
+## моделирование 
+
+```{r conclusions}
+
+heal_model <- function (n_rep, n_pat, Pr_set) {
+  true_mean <- Pr_set
+  
+  model<-data.frame(
+    n_exp = rep(1:n_rep, each = n_pat),
+    ID =  rep(1:n_pat, n_rep),
+   heal = round(rbinom(n_rep*n_pat,1,Pr_set), 0)
+   )
+ df_model_mean <- model %>%
+  group_by(n_exp) %>% 
+  dplyr::summarise(mean_heal = mean(heal)) %>% 
+  ungroup()
+   
+ error <- round (sqrt( mean((df_model_mean$mean_heal-Pr_set)^2) ), 3)
+  return (error)
+}
+
+# тестируем влияние размера выборки при p = 0.5
+heal_model (100, 200, 0.5)
+heal_model (100, 70, 0.5)
+heal_model (100, 10, 0.5)
+
+
+# тестируем влияние значения истинной вероятности
+heal_model (100, 30, 0.05)
+heal_model (100, 30, 0.25)
+heal_model (100, 30, 0.5)
+heal_model (100, 30, 0.95)
+
+```
+## Табличный вид
+
+```{r conclusions}
+# протестируем некоторые значения истинной вероятности из диапазона 0-1 
+error_pr_table <-data.frame(
+    n_repeats = 100, 
+    sample = 30,
+    Pr = c (0.05, 0.1, 0.25 , 0.5, 0.6, 0.8, 0.95)) 
+error_pr_table  %>% rowwise () %>% mutate (error = heal_model (n_pat = n_patients, n_rep = sample, Pr_set = Pr))
+
+error_sample_table <-data.frame(
+    n_repeats = 100, 
+    sample = c (30, 70, 100, 200, 1000),
+    Pr = 0.5) 
+error_sample_table  %>% rowwise () %>% mutate (error = heal_model (n_pat = sample, n_rep = n_repeats, Pr_set = Pr))
+
+
+```
+
+## Вывод
+При увеличении количества наболюдений (пациентов) точность оценки повышается. 
+Наиболее точная оценка, то есть наименьшая ошибка среднего, при одном и том же количестве наблюдений (пациентов) наблюдается при значениях p близких к 0 и 1, наибольшая ошибка - при значениях, близких к 0.5 . Особенно это заметно при небольших (для данного распределения) выборках (30, до 100). В целом наблюдение подтверждается формулой для стандартной ошибки среднего при распределении бернулли, где SE возрастает с увеличением произведения p* (1-p) , а с увеличением n - уменьшается.
+
