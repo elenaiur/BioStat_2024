@@ -1,0 +1,390 @@
+---
+title: "automatization_notebook_02"
+output:
+  html_document:
+    df_print: paged
+date: "`r Sys.Date()`"
+author: "Eleba Iurlova"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggbeeswarm) # beeplot
+library(ggpubr)
+library (psych)
+library (corrplot)
+library (flextable)
+```
+
+# Чтение данных
+
+В вашем варианте нужно использовать датасет food.
+
+```{r}
+food <- read_csv("data/food.csv")
+```
+
+# Выведите общее описание данных
+
+```{r}
+summary (food)
+
+```
+
+# Очистка данных
+
+1)  Уберите переменные, в которых пропущенных значений больше 20% или уберите субъектов со слишком большим количеством пропущенных значений. Или совместите оба варианта. Напишите обоснование, почему вы выбрали тот или иной вариант:
+
+**Обоснование**: нет пропущенных значений.
+
+2)  Переименуйте переменные в человекочитаемый вид (что делать с пробелами в названиях?);
+
+3)  В соответствии с описанием данных приведите переменные к нужному типу (numeric или factor);
+
+4)  Отсортируйте данные по возрасту (углеводам) по убыванию;
+
+5)  Сохраните в файл outliers.csv субъектов, которые являются выбросами (например, по правилу трёх сигм) — это необязательное задание со звёздочкой;
+
+6)  Отфильтруйте датасет так, чтобы остались только Rice и Cookie (переменная Category и есть группирующая);
+
+7)  Присвойте получившийся датасет переменной "cleaned_data".
+
+```{r}
+food %>% summarise_all(~ sum(is.na(.)))  #проверка наличия пропущенных значений
+
+names(food) <- names(food) %>% str_replace_all("\\.", "_") %>% str_replace_all(" ", "_") %>% str_remove_all("Data_") %>%  str_remove_all ("-_|Major_|Fat_|Vitamins_")
+
+outliers_ci <- food  %>%  mutate(Outlier = (Carbohydrate < quantile(Carbohydrate, 0.25) - IQR(Carbohydrate)*1.5 |
+           Carbohydrate > quantile(Carbohydrate, 0.75) + IQR(Carbohydrate)*1.5)) %>% filter(Outlier)  # outliers СI
+
+# Сохраним значения outliers в отдельный .csv
+outliers <- food %>%  mutate (Outlier1 = Carbohydrate > mean(Carbohydrate) + 3*sd(Carbohydrate) |
+           Carbohydrate < mean(Carbohydrate) - 3*sd(Carbohydrate))  %>% filter(Outlier1==  T) %>% select (!Outlier1)   # по правилу 3 сигм
+
+write.csv(outliers, "outliers.csv", row.names = FALSE)
+
+cleaned_data <- food %>% mutate (Category= as.factor(Category), `Nutrient_Bank_Number`= as.factor(`Nutrient_Bank_Number`)) %>% arrange(desc(Carbohydrate)) %>% filter (Category %in% c("Rice", "Cookie"))
+cleaned_data$Category <- droplevels(cleaned_data$Category) # удалим убранные уровни фактора 
+
+```
+
+# Сколько осталось переменных?
+
+```{r}
+length (cleaned_data)
+paste0 ("new dataframe contains ",  length (cleaned_data) , " variables")
+
+```
+
+# Сколько осталось случаев?
+
+```{r}
+
+nrow (cleaned_data)
+paste0 ("new dataframe contains ",  nrow(cleaned_data) , " rows")
+
+```
+
+# Есть ли в данных идентичные строки?
+
+```{r}
+  dupl<-duplicated(cleaned_data)
+  ifelse (length (dupl [dupl== T]) >0 , "there are identical variables", "no indentical variables")
+  
+# либо вывести идентичные строки 
+  cleaned_data|>
+  group_by_all() |>
+  filter(n() > 1) |>
+  ungroup()
+
+```
+
+# Сколько всего переменных с пропущенными значениями в данных и сколько пропущенных точек в каждой такой переменной?
+
+```{r}
+# с пропущенными значениями
+
+var_with_NA<-cleaned_data %>% select (where(~sum(is.na(.)) > 0)) %>%  length()
+paste0 ("dataframe cleaned_data contains ",  var_with_NA, " variables with missing values")
+
+#  сколько пропущенных значений в каждой переменной
+
+food %>% summarise_all(~ sum(is.na(.)))  %>% pivot_longer(cols = everything()) 
+```
+
+# Описательные статистики
+
+## Количественные переменные
+
+1)  Рассчитайте для всех количественных переменных для каждой группы (Category):
+
+1.1) Количество значений;
+
+1.2) Количество пропущенных значений;
+
+1.3) Среднее;
+
+1.4) Медиану;
+
+1.5) Стандартное отклонение;
+
+1.6) 25% квантиль и 75% квантиль;
+
+1.7) Интерквартильный размах;
+
+1.8) Минимум;
+
+1.9) Максимум;
+
+1.10) 95% ДИ для среднего - задание со звёздочкой.
+
+```{r}
+statistics <- list(
+      `Количество значений` = ~length(.x) %>%as.character(),
+      `Количество пропущенных значений` = ~sum(is.na(.x)) %>%as.character(),
+      `Среднее значение` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", mean(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+      `Медиана` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", median (.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+      `Станд. отклон.` = ~ifelse(sum(!is.na(.x)) < 3, "Н/П*", sd(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+      `Q1 - Q3` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(quantile(.x, 0.25, na.rm = TRUE) %>% round(2), " - ", quantile(.x, 0.75, na.rm = TRUE) %>% round(2))),
+      `IQR` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", round(quantile(.x, 0.75, na.rm = TRUE) -  quantile(.x, 0.25, na.rm = TRUE), 2))%>% as.character(),
+      `мин. - макс.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(min(.x, na.rm = TRUE) %>% round(2), " - ", max(.x, na.rm = TRUE) %>% round(2))),
+      `CI` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0( (mean(.x, na.rm = TRUE) - (1.96 * sd(.x, na.rm = TRUE)/sqrt (length(.x)))) %>% round(2) , " - ", (mean(.x, na.rm = TRUE) + (1.96 * sd(.x, na.rm = TRUE)/sqrt(length(.x)))) %>% round(2)))
+      )
+
+cleaned_data %>%
+  select (Category, where ( is.numeric)) %>%
+  group_by (Category) %>%
+  summarise (across(where(is.numeric), statistics)) %>%
+  pivot_longer (!Category) %>%
+  separate (name, into = c ("Переменная", "Статистика"), sep= "_(?!.*_)") %>%
+  rename (`Значение` = value, `Категория` = Category) %>%
+  flextable()
+
+```
+
+## Категориальные переменные
+
+1)  Рассчитайте для всех категориальных переменных для каждой группы (Category):
+
+1.1) Абсолютное количество;
+
+1.2) Относительное количество внутри группы;
+
+1.3) 95% ДИ для доли внутри группы - задание со звёздочкой.
+
+```{r}
+# нет категориальных переменных подходящих для анализа
+
+```
+
+# Визуализация
+
+## Количественные переменные
+
+1)  Для каждой количественной переменной сделайте боксплоты по группам. Расположите их либо на отдельных рисунках, либо на одном, но читаемо;
+
+2)  Наложите на боксплоты beeplots - задание со звёздочкой.
+
+3)  Раскрасьте боксплоты с помощью библиотеки RColorBrewer.
+
+```{r}
+theme_custom <- theme(
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    plot.subtitle = element_text(size = 16, hjust = 0.5),
+    strip.text = element_text(size = 16),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16 ),
+    legend.position = "right"
+  )
+# c использованием базового R (первый вариант)
+lapply(seq_along(cleaned_data)[sapply (cleaned_data, is.numeric)], function(i) {
+  y<-cleaned_data[[i]]
+  ggplot(cleaned_data, aes (x = Category, y = y, fill = Category))+
+  geom_boxplot(outliers = F) +
+  geom_beeswarm(size = 1.5, cex = 1, alpha = 0.3) +
+  theme_custom +
+  scale_fill_brewer(palette = "Accent") +
+  labs(y = "Value", title = paste0("Boxplot: ", colnames(cleaned_data)[[i]]))
+})
+```
+
+```{r}
+make_qqplot <- function(data, var) {
+  data %>% 
+    ggplot() +                                                    
+    aes(x = Category, y = !!as.name(var), fill = Category) + 
+    geom_boxplot(width = 0.2, notch = FALSE, position = position_dodge(1), lwd = 1, outlier.shape = NA)+
+    scale_fill_brewer(palette = "Accent") +
+    geom_beeswarm(size = 1.5, cex = 1, alpha = 0.3) +
+    theme_custom 
+}
+vars <- cleaned_data %>% select(where(is.numeric)) %>% names ()
+
+plots <- map(vars, ~ make_qqplot(cleaned_data, .x))
+plots
+```
+
+## Категориальные переменные
+
+1)  Сделайте подходящие визуализации категориальных переменных. Обоснуйте, почему выбрали именно этот тип.
+
+```{r}
+ # нет подходящих категориальных переменных
+
+```
+
+# Статистические оценки
+
+## Проверка на нормальность
+
+1)  Оцените каждую переменную на соответствие нормальному распределению с помощью теста Шапиро-Уилка. Какие из переменных являются нормальными и как как вы это поняли?
+
+Для теста Шапиро-Уилка:\
+Н0- выборка получена из нормального распределения (данные согласуются с нормальным распределением)\
+Н1- выборка получена из распределения, отличного от нормального\
+Т.к. значения p- value гораздо меньше порогового знаения (0.05), можем отвергнуть Н0 и сделать вывод, что все количественные данные в датасете не согласуются с нормальным распределением.
+
+```{r}
+
+normality<-cleaned_data %>% 
+       select(where (is.numeric))%>% 
+       summarise_all( list(statistic = ~shapiro.test(.x)$statistic , 
+                                  p.value = ~shapiro.test(.x)$p.value)) %>%
+      pivot_longer (everything()) %>%
+      separate (name, into = c ("Переменная", "Статистика"), sep= "_(?!.*_)") %>%
+      filter (`Статистика` == "p.value") %>% select (!`Статистика`) %>% 
+      rename (`p-value` = value) %>%
+      mutate (`Нормальность (тест Шапиро-Уилка)` = ifelse (`p-value` > 0.05, "Да", "Нет" )) %>% 
+      flextable() %>% 
+      set_formatter(`p-value` = function(x) {
+      formatC(x, format = "e", digits = 2)
+      })
+
+normality
+```
+
+2)  Постройте для каждой количественной переменной QQ-плот. Отличаются ли выводы от теста Шапиро-Уилка? Какой метод вы бы предпочли и почему?
+
+##### c использованием базового R (первый вариант)
+
+```{r}
+lapply(seq_along(cleaned_data)[4:9], function(i) {
+  dat<-cleaned_data[[i]]
+  ggplot(cleaned_data, aes(sample = dat)) +
+  geom_qq() +
+  geom_qq_line() +
+  #scale_color_manual(values = c("brown", "#E7B800"))+
+  labs(y = "sample quantiles", x = "theoretical quantiles",  title = paste0("QQ-plot: ",colnames(cleaned_data)[[i]]))+
+  theme_custom
+})
+
+# https://www.cedricscherer.com/2023/07/05/efficiency-and-consistency-automate-subset-graphics-with-ggplot2-and-purrr/
+```
+
+Результаты не отличаются от теста на нормальное распределение, если проводить сравнение без разделения на группы (категории). В данном случае выборки достаточно большие, поэтому больше подходит QQ- plot.\
+В целом графические методы более предпочтительны.
+
+Результат тест Шапиро- Уилка очень зависит от объема выборки, и рекомендуется для относительно небольших выборок (до 50). Выборки разного размера из одной популяции могут давать совершенно разные резульаты теста. При больших выборках небольшие отклонения от нормального распределния могут привести к ложному отвержению нулевой гипотезы.
+
+При разбиении на категории, графики некоторых величин, становятся более согласованными с нормальным распределением\
+
+3)  Ниже напишите, какие ещё методы проверки на нормальность вы знаете и какие у них есть ограничения.
+
+**Другие методы оценки нормальности**
+
+Есть еще аналитические тесты например Колмогорова-Смирного и Андерсона- Дарлинга, но считается что их мощность ниже чем теста Шапиро-Уилка.\
+Кроме того, используются такие характеристики как skewness (симметрия) and kurtosis (коэффициент эксцесса, мера остроконечности пика распределения величины). Недостатками этих моделей является то, что для них нет строгих критериев, какие значения параметра считать пороговыми для принятия решения о нормальности. Эти оценки также не заменяют построенеи QQ- plot (или гистограмм).
+
+## Сравнение групп
+
+1)  Сравните группы (переменная **Category**) по каждой переменной (как количественной, так и категориальной). Для каждой переменной выберите нужный критерий и кратко обоснуйте его выбор в комментариях.
+
+```{r}
+cleaned_data %>% group_by(Category)%>% tally()
+
+cleaned_data %>%
+  select(where(is.numeric)) %>% 
+  names() %>% 
+  set_names() %>% 
+  map(function(x) t.test(cleaned_data[[x]] ~ cleaned_data$Category)$p.value < 0.05) %>% 
+  enframe() %>% 
+  unnest()
+  
+```
+
+Комментарий:
+
+Для сравнения групп выбираем t-test для количественных переменных, так как объем выборки 100 измерений для категории "Cookie" и 143 для категории "Rice" позволяет нам использовать свойство нормализации средних значений, что позволяет не учитывать данные о нормальности рапределений в генеральной совокупности. В таком случае основной критерий - независимость значений переменных.
+
+Н0 - средние значения переменной в группе 1 РАВНЫ среднему значению по данной переменной в группе 2\
+Н1 - средние значения переменной в группе 1 НЕ РАВНЫ среднему значению по данной переменной в группе 2
+
+При значении p-value меньше порогового (0,05) Н0 отвергаем
+
+В принципе непараметрический тест Манн-Уитни дает нам почти такие же результаты, за исключением результата для Сholosterol.\
+Так как t-test Cтьюдента обладает большей мощностью по сравнению с непараметрическим тестом Манна-Уитни (Wilcoxon test), в данном случае лучше выбрать его.
+
+# Далее идут **необязательные** дополнительные задания, которые могут принести вам дополнительные баллы в том числе в случае ошибок в предыдущих
+
+## Корреляционный анализ
+
+1)  Создайте корреляционную матрицу с визуализацией и поправкой на множественные сравнения. Объясните, когда лучше использовать корреляционные матрицы и в чём минусы и плюсы корреляционных исследований.
+
+```{r fig.width=10 }
+require(psych)
+require (corrplot)
+
+correlation  <- psych::corr.test(cleaned_data[, c(4:38)],method = "spearman", adjust = "fdr") # c поправкой на множ. сравнения
+corrplot(corr = correlation$r, # график для коэффициента корреляции
+         method = "color",
+         order = "hclust")
+
+#correlation$p #значения p- value 
+```
+
+Корреляционный анализ используется для первичной "экслораторной" оценки данных с целью выявить возможные взаимосвязь между переменными и обозначить дальнейшие направления поиска. Позволяет оценить сразу много переменных.
+
+Недостатком является то, что метод не позволяет анализировать качественные переменные (ковариация и как следствие кореляция могут быть осмысленно посчитаны только между количественными переменными.\
+Наличие корреляции не позволяет сделать вывод о наличии причинно-следственной связи, но помогает в дизайне исследований которые могут доказать причино-следственную связь. Также метод чувствителен к выбросам, и способен выявить лишь линейную взаимосвязь.
+
+```{r}
+require (corrplot)
+
+# вариант визуализации корреляционной матрицы с помощью corrplot, где крестиком отмечены незначимые различия по уровню p-value для части переменных
+nums<-cleaned_data[,c(4:14)]
+mat <- corr.test(nums,method = "spearman", adjust = "fdr")
+res1 <- corrplot::cor.mtest(nums, conf.level = .95) ## specialized the insignificant value according to the significant level (0,05)
+corrplot(mat$r, p.mat = res1$p) ## is significant level, with default value 0.05. 
+
+```
+
+## Моделирование
+
+1)  Постройте регрессионную модель для переменной **Category**. Опишите процесс построения
+
+```{r}
+cleaned_data %>% group_by(Category) %>%summarise_if(is.numeric, mean, na.rm = TRUE)
+
+colnames(cleaned_data)
+cleaned_data$Category <- as.factor(cleaned_data$Category) 
+# для примера возьмем некоторые переменные. 
+# Так как модель предсказывает категориальную переменную- то выбираем GLM
+fit  <- glm(Category ~ `Beta_Carotene`  + `Lycopene`+ `Total_Lipid`+ `Choline`, cleaned_data, family = "binomial")
+# выводим результат модели
+summary(fit)
+```
+
+Интерпретация (попытка):
+
+Estimates это логарифм odds (то есть логарифм отношения вероятности одной категории "Сookie" к вероятности другой категории "Rice"). Таким образом мы трансформируем значения вероятности от + бесконечности до - бесконечности. Intercept отражает вероятность принадлежности к категории 2 (в данном случае "Rice") при условии что все объясняющие переменные (terms) неизменны и равны 0. Estimate для каждой из переменных отражает изменение значения логарифма odds обусловленное данной переменной при условии, что остальные переменные неизменны.
+
+В этой модели с увеличением содержания Total_Lipid, вероятность принадлежности к группе "Riсe" существенно уменьшается (значимо,p-value < 0.001 ) у, так как значение Estimate отрицательно. Также значимыми предикторами являются Бета-каротин и Холин (уровень значимость - 0.01).
+
+```{r}
+exp(fit$coefficients) # можно перейти к коэффициентам (odds) от логарифма
+```
