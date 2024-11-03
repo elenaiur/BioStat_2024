@@ -202,15 +202,15 @@ theme_custom <- theme(
     legend.position = "right"
   )
 # c использованием базового R (первый вариант)
-lapply(seq_along(cleaned_data)[sapply (cleaned_data, is.numeric)], function(i) {
-  y<-cleaned_data[[i]]
-  ggplot(cleaned_data, aes (x = Category, y = y, fill = Category))+
-  geom_boxplot(outliers = F) +
-  geom_beeswarm(size = 1.5, cex = 1, alpha = 0.3) +
-  theme_custom +
-  scale_fill_brewer(palette = "Accent") +
-  labs(y = "Value", title = paste0("Boxplot: ", colnames(cleaned_data)[[i]]))
-})
+#lapply(seq_along(cleaned_data)[sapply (cleaned_data, is.numeric)], function(i) {
+#  y<-cleaned_data[[i]]
+#  ggplot(cleaned_data, aes (x = Category, y = y, fill = Category))+
+#  geom_boxplot(outliers = F) +
+#  geom_beeswarm(size = 1.5, cex = 1, alpha = 0.3) +
+#  theme_custom +
+#  scale_fill_brewer(palette = "Accent") +
+#  labs(y = "Value", title = paste0("Boxplot: ", colnames(cleaned_data)[[i]]))
+#})
 ```
 
 ```{r}
@@ -270,10 +270,9 @@ normality
 
 2)  Постройте для каждой количественной переменной QQ-плот. Отличаются ли выводы от теста Шапиро-Уилка? Какой метод вы бы предпочли и почему?
 
-##### c использованием базового R (первый вариант)
 
 ```{r}
-lapply(seq_along(cleaned_data)[4:9], function(i) {
+lapply(seq_along(cleaned_data)[4:38], function(i) {
   dat<-cleaned_data[[i]]
   ggplot(cleaned_data, aes(sample = dat)) +
   geom_qq() +
@@ -283,7 +282,6 @@ lapply(seq_along(cleaned_data)[4:9], function(i) {
   theme_custom
 })
 
-# https://www.cedricscherer.com/2023/07/05/efficiency-and-consistency-automate-subset-graphics-with-ggplot2-and-purrr/
 ```
 
 Результаты не отличаются от теста на нормальное распределение, если проводить сравнение без разделения на группы (категории). В данном случае выборки достаточно большие, поэтому больше подходит QQ- plot.\
