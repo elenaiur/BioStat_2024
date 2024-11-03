@@ -114,3 +114,30 @@ get_cat_table (factor_data, "insurance") %>%
 
 ```
 
+#####  QQ-plot для количественных переменных
+
+```{r}
+
+make_qqplot <- function(data, i) {
+    ggplot(data, aes(sample = !!as.name(i), color = insurance )) +                                          
+  stat_qq() +
+  geom_qq_line() +
+  #scale_color_manual(values = c("brown", "#E7B800"))+
+  labs(y = "sample quantiles", x = "theoretical quantiles", title = paste0("QQ-plot: ", i))+
+  theme_custom
+}
+vars <- insurance_data %>% select(where(is.numeric) & !rownames) %>% names ()
+
+plots <- map(vars, ~ make_qqplot(insurance_data, .x))
+plots
+
+```
+
+
+
+
+
+
+
+
+
