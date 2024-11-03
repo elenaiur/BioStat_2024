@@ -1,0 +1,116 @@
+---
+title: "miniproject_statistics"
+output: html_document
+date: "2024-11-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library (tidyverse)
+library (dplyr)
+library (stringr)
+library (flextable)
+library (ggplot2)
+
+get_cat_table <- function(factor_data, group_variable) {
+  
+  get_cat_table_one_variable <- function(factor_data, group_variable, variable_name) {
+    
+    factor_data %>%
+      count(.data[[group_variable]], .data[[variable_name]], .drop = FALSE) %>% #считаем абс частоты
+      mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>% #считаем относит частоты
+      
+      group_by(.data[[group_variable]]) %>% # группируем 
+      mutate(`Relative frequency by group` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>% # считаем отн частоты внутри групп
+      ungroup() %>%
+      
+      rename(`Absolute frequency` = n) %>% # приделываем к ней результат теста 
+      mutate(`Fisher test, p-value` = table(factor_data[[group_variable]], factor_data[[variable_name]]) %>% # фишер ест сводную таблицу
+               fisher.test(simulate.p.value=TRUE) %>% .$p.value %>% round(3), # вынимаем p-value / округляем
+             Variable = variable_name) %>%
+      rename(Value := variable_name, # вроде работает и без двоет но с ним надежнее
+             Group := group_variable)
+    
+  }
+  
+  factor_data %>%
+    select(!group_variable) %>%
+    names() %>%
+    map_dfr(function(variable_name) get_cat_table_one_variable(factor_data, group_variable, variable_name)) %>% #склеиваем таблички
+    select(Variable, Group, everything())
+  
+}
+
+```
+
+##### Загрузка данных и проверка NA
+
+```{r cars}
+insurance_data <- read.csv( "HealthInsurance.csv" )
+summary (insurance_data)
+
+#проверка NA
+length(insurance_data [is.na (insurance_data) == T])
+
+#проверка идентичных строк
+insurance_data |> 
+  group_by_all() |>
+  filter(n() > 1) |>
+  ungroup()
+
+# факторы
+
+FactorCols <- !sapply(insurance_data, is.numeric)
+insurance_data[FactorCols] <- lapply(insurance_data[FactorCols], as.factor)
+
+```
+
+##### Описательные статистики для количественных переменных
+
+```{r}
+statistics <- list(
+      `Количество значений` = ~length(.x) %>%as.character(),
+      `Количество пропущенных значений` = ~sum(is.na(.x)) %>%as.character(),
+      `Среднее значение` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", mean(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+      `Медиана` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", median (.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+      `Станд. отклон.` = ~ifelse(sum(!is.na(.x)) < 3, "Н/П*", sd(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+      `Q1 - Q3` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(quantile(.x, 0.25, na.rm = TRUE) %>% round(2), " - ", quantile(.x, 0.75, na.rm = TRUE) %>% round(2))),
+      `IQR` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", round(quantile(.x, 0.75, na.rm = TRUE) -  quantile(.x, 0.25, na.rm = TRUE), 2))%>% as.character(),
+      `мин. - макс.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(min(.x, na.rm = TRUE) %>% round(2), " - ", max(.x, na.rm = TRUE) %>% round(2))),
+      `CI` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0( (mean(.x, na.rm = TRUE) - (1.96 * sd(.x, na.rm = TRUE)/sqrt (length(.x)))) %>% round(2) , " - ", (mean(.x, na.rm = TRUE) + (1.96 * sd(.x, na.rm = TRUE)/sqrt(length(.x)))) %>% round(2)))
+      )
+
+names (insurance_data)
+ insurance_data %>%
+  select (insurance, where ( is.numeric) & !rownames)  %>%
+  group_by (insurance) %>%
+  summarise (across(where(is.numeric), statistics)) %>%
+  pivot_longer (!insurance) %>%
+  separate (name, into = c ("Переменная", "Статистика"), sep= "_(?!.*_)") %>%
+  rename (`Значение` = value, `Страхование` = insurance) %>%
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center", part = "all") %>%
+  merge_v(c("Страхование", "Переменная")) 
+ 
+```
+
+
+##### Описательные статистики для количественных переменных
+
+```{r }
+
+insurance_data %>%
+  select(where(is.factor)) -> factor_data
+
+get_cat_table (factor_data, "insurance") %>%
+  rename ("Insurance" = Group)%>%
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center", part = "all") %>%
+  merge_v(c("Group", "Variable")) %>%
+  merge_v("Variable", target = "Fisher test, p-value")
+
+```
+
