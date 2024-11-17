@@ -1,0 +1,428 @@
+---
+title: "advanced_vis"
+author: "Elena Iurlova"
+output: html_document
+date: "2024-11-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library (tidyverse)
+library (gtsummary)
+library (rstatix)
+library(ggpubr)
+library (psych)
+library(corrplot)
+library(corrr)
+library(lubridate)
+library(factoextra)
+```
+
+#### 1. Загрузка, очистка по условию
+Загрузите датасет very_low_birthweight.RDS (лежит в папке домашнего задания). 
+Это данные о 671 младенце с очень низкой массой тела (<1600 грамм), собранные в Duke University Medical Center доктором Майклом О’Ши c 1981 по 1987 г.  Описание переменных см. здесь. Переменными исхода являются колонки 'dead', а также время от рождения до смерти или выписки (выводятся из 'birth' и 'exit'. 7 пациентов были выписаны до рождения). 
+Сделайте копию датасета, в которой удалите колонки с количеством пропусков больше 100, а затем удалите все строки с пропусками. 
+
+
+```{r }
+
+very_low_birthweight <- readRDS("very_low_birthweight.RDS")
+
+full_cols <- very_low_birthweight %>% summarise_all(~ sum(is.na(.))) %>%
+                         select (!c(lol, magsulf,meth,toc, pvh, ivh, ipe)) %>%  names () # колонки, где меньше 100 пропусков
+very_low_birthweight_с <- very_low_birthweight  %>% select(all_of(full_cols)) %>% 
+                                          mutate (id = seq(1,671)) %>%  # введем колонку id для обозначения пациентов до всех удалений
+	                                             filter (if_all (where(is.numeric),
+	                                                								~!is.na(.)))  # удалим строки, где есть NA в численных значениях
+
+# ранее использовала drop.na(), но так учитываюися и категориальные переменные (на 4 кейса меньше остается), а нам все же важнее complete cases по количественным переменным
+
+#summary (very_low_birthweight_с)
+#very_low_birthweight_с  %>%  tbl_summary(by = dead) %>% add_p()
+
+very_low_birthweight_с  %>% 
+  skimr::skim()
+
+#альтернативный способ расчитать дни в госпитале 
+#very_low_birthweight_с %>%  mutate(term = as.numeric(date_decimal(exit)- date_decimal(birth))/86400) 
+                                    
+```
+
+#### 2. Графики плотности распределения, факторы
+Постройте графики плотности распределения для числовых переменных. Удалите выбросы, если таковые имеются. Преобразуйте категориальные переменные в факторы. Для любых двух числовых переменных раскрасьте график по переменной ‘inout’.
+
+```{r pressure, echo=FALSE}
+
+cleaned_data <- very_low_birthweight_с %>% 
+                mutate (across(c(twn, vent, pneumo, pda, cld, dead, id), ~ as.factor (.))) %>%
+                select (!c (year, birth, exit)) %>%
+                mutate(across(where(is.numeric), ~ifelse (. < quantile(., 0.25) - IQR(.)*1.5 |  # удалим выбросы в количественнх данных
+                 . > quantile(., 0.75) + IQR(.)*1.5, NA, .))) %>%  filter (if_all (where(is.numeric),
+	                                                								~!is.na(.)))
+
+make_plot <- function(data, var) {
+  data %>% 
+    ggplot(aes( x = !!as.name(var)))+
+    geom_density()
+}
+# Построим графики плотности распределения для всех числовых переменных.
+vars <- cleaned_data %>% select(where(is.numeric)) %>% names ()
+plots <- map(vars, ~ make_plot(cleaned_data, .x))
+plots 
+
+# раскрасим 2 графика по переменной inout
+mapping <- aes(color=inout)
+plots[[1]]+ mapping
+plots[[2]]+ mapping
+
+```
+#### 3. Проведите тест на сравнение значений колонки ‘lowph’
+
+3.	Проведите тест на сравнение значений колонки ‘lowph’ между группами в переменной inout. Вид статистического теста определите самостоятельно. Визуализируйте результат через библиотеку 'rstatix'. Как бы вы интерпретировали результат, если бы знали, что более низкое значение lowph ассоциировано с более низкой выживаемостью?
+
+```{r}
+wilcox.test (lowph ~ inout , data = cleaned_data)
+# wilcox-test
+stat.test <- cleaned_data %>% 
+t_test(lowph ~ inout, paired = FALSE) 
+stat.test
+
+# Create a box plot with rstatix
+
+ggplot(cleaned_data, aes(inout, lowph, color = inout)) + # This is the plot function
+  geom_boxplot(width = 0.2, fill = "white", alpha = 0.1) +
+  stat_pvalue_manual(
+    stat.test,
+    y.position = 7.7, step.increase = 1,
+    label = "p"
+  )
+```
+Н0 - медианы (т.к тест Манн-Уитни) значений lowph для  новорожденных, рожденных в Дюке и перевезенных не различаюся. Н0 отвергаем. \
+Вариант интерпретации - дети транспортированные в госпиталь имеют более низкий показатель lowph и более низкую выживаемость, чем дети, рожденные в госпитале. Вероятно из других больниц чаще поступают дети в более тяжелом состоянии состоянии, чем рожденные в самом центре.
+
+#### 4. Корреляции, графики для корреляций
+
+4.	Сделайте новый датафрейм, в котором оставьте только континуальные или ранговые данные, кроме 'birth', 'year' и 'exit'. Сделайте корреляционный анализ этих данных. Постройте два любых типа графиков для визуализации корреляций.
+
+```{r}
+require(psych)
+require (corrplot)
+
+corr_cl_data <- cleaned_data %>% select (where (is.numeric)) # новый датасет в количественными и ранговыми переменными
+correlation  <- psych::corr.test(corr_cl_data, method = "spearman", adjust = "fdr") # c поправкой на множ. сравнения
+
+# график матрицы корреляций
+corrplot(corr = correlation$r, 
+         type="upper", order="hclust", method = "number", col = COL2('PiYG'), 
+         p.mat = correlation$p, sig.level = 0.01, insig = "blank")
+
+# network (показывает силу связей и взаимоположение)
+library(corrr)
+net <- corr_cl_data %>% 
+  cor() %>% 
+  network_plot()
+net
+```
+btw и gest значительно скорелированы, hospstay и bwt/gest слабо отрицательно скорелированы.\
+net plot визуализирует взамосвязи и степень корреляции переменных.
+
+#### 5. Иерархическая кластеризация.
+
+```{r}
+birth_scaled <- scale(corr_cl_data)  # шкалирование 
+birth_dist <- dist(birth_scaled)  # вычисление дистанций 
+
+df_dist.hc <- hclust(d = birth_dist,
+                     method = "ward.D2")
+fviz_dend(df_dist.hc, horiz = TRUE,
+          cex = 0.6)
+
+
+#library("ape")
+#plot(as.phylo(df_dist.hc), type = "fan")
+```
+
+#### 6. Одновременный график heatmap и иерархической кластеризации.
+
+```{r}
+library(pheatmap)
+
+hierarchy <- pheatmap(birth_scaled, 
+         show_rownames = FALSE, 
+         clustering_distance_rows = birth_dist,
+         clustering_method = "ward.D2", 
+         cutree_rows = 5, #зададим количество кластеров для рядов
+         cutree_cols = length(colnames(birth_scaled)),
+         angle_col = 45, 
+         main = "Dendrograms for clustering rows and columns with heatmap")
+hierarchy 
+```
+На основе дистанций по средним шкалированных значений переменных построили дендрограмму для переменных (сверху). Видно, что дистанция между bwt и gest минимальна (по средним значениям), и эти переменные "похожи" между собой и визуально представляют один кластер, далее скорее всего в один кластер объединены переменные apg1, lowph и pltct. Hostpstay отстоит от остальных переменных максимально далеко по значениям матрицы дистанций.\ 
+
+По такому же принципу построили дендрограмму для строк, то есть иерархически объединили наблюдения (отдельных новорожденных) по степени близости на матрице дистанций. Значение кол-ва кластеров (отсечки) 5 задали самостоятельно в настройках.
+
+#### 7. Проведите PCA анализ
+
+7.	Проведите PCA анализ на этих данных. Проинтерпретируйте результат. Нужно ли применять шкалирование для этих данных перед проведением PCA?
+
+PCA- метод снижения размерности, то есть преобразования данных таким образом, чтобы, снизив количество переменных, сохранить наибольшее число информации об "вариантивности" данных, то есть соблюсти отношения между строками/наблюдениями. Также метод помогает преобразовать данные таким образом, чтобы убрать корреляцию между переменными (в случае "birth" это найденные ранее скоррелированные переменные). 
+
+В результате PCA мы получаем "новые" нескоррелрованные переменные - компоненты и их количество равно кол-ву колонок. Компоненты имеют иерархию по признаку того, какой процент дисперсии исходных данных они объясняют (Proportion of variance). Метод позволяет анализировать и строки, и колонки единовременно.
+
+Шкалирование нужно, чтобы корректно соотносить и делать математичекие операции разных переменных друг с другом. 
+
+```{r}
+library(factoextra)
+library(FactoMineR)
+library(ggbiplot) 
+
+birth.pca <- prcomp(corr_cl_data, 
+                scale = T) # шкалирование нужно так как датафрейм подаем не шкалированный
+summary(birth.pca)
+# birth.pca$rotation
+
+# графическая визуализация доли объясненной изменчивости для каждой из компонент
+fviz_eig (birth.pca, addlabels = T, ylim = c (0,50))
+
+```
+
+В случае датасета birth алгоритм сработал достаточно хорошо, так как 3 компоненты объясняют 74% дисперcии (Cumulative Proportion of variance). 60% для первых 2 компонент означает что в исходных данных много скоррелированных колонок/ либо корреляция сильная.
+
+```{r}
+contr_1 <- fviz_contrib(birth.pca, choice = "var", axes = 1) 
+contr_2 <- fviz_contrib(birth.pca, choice = "var", axes = 2) # axes - номер комоненты, из чего состоит каждая компонента?
+contr_1
+contr_2
+pca_graph <- fviz_pca_var(birth.pca, col.var = "contrib")
+pca_graph
+
+```
+На графике "Variables- PCA" выше визуализированы 1 и 2 главные компоненты (по осям x и y, % показывает долю объясненной вариации вариативности (дисперсии данных)). Длина стрелки (и цвет стрелки) обозначает сколько корреляции было в переменной и каков вклад переменой в дисперсию, объясненную PC1 и PC2. Видно три группы  скоррелированы переменных, причем hospstay и btw/gest отрицательно зависимы. Группа bwt/gest образуют почти прямой угол, что говорит об их вероятной нескоррелированности (по PC2). 
+
+На графике "Сontribution" видим из вклада каких переменных состоит компонента. Хорошо, когда несколько переменных дают наибольший вклад в объясняемую компонентой дисперсию - в наших данных это наблюдается скорее для PC2 и PC3. 
+
+
+8.	Постройте biplot график для PCA. Раскрасьте его по значению колонки 'dead'.
+
+```{r}
+library(ggbiplot)
+biplot <- ggbiplot(birth.pca, 
+         scale=0, alpha = 0.3, ellipse = TRUE, groups = cleaned_data$dead) +
+         labs(title = "PCA of yield contributing parameters", fill = "dead", color = "dead")
+biplot
+```
+pltсt 
+
+
+9. 3D vis с помощью plot_ly
+```{r}
+	library(plotly)
+
+
+ggplotly(biplot, textposition = "none")
+ggplotly(biplot) %>% config(displayModeBar = F)
+
+bipl <- ggbiplot(birth.pca, alpha = 0.2, scale=0, ellipse = TRUE, groups = cleaned_data$dead) +
+	 geom_point(size = 2,alpha = 0.1, aes(col = cleaned_data$dead, text = paste0("ID: ", cleaned_data$id))) +
+	 labs(title = "PCA of yield contributing parameters", fill = "dead", color = "dead")
+ 
+  labs(title = "PCA of yield contributing parameters", fill = "dead", color = "dead")
+ggplotly(bipl, tooltip = "text")
+
+# https://rawgit.com/valentinitnelav/valentinitnelav.github.io/master/assets/2018-08-25-PCA-interactive-biplot/PCA-interactive-biplot.html
+# https://plotly.com/r/pca-visualization/
+# https://rpubs.com/McGarveyA/ggplot2-plotly
+```
+
+10.	Дайте содержательную интерпретацию PCA анализу. Почему использовать колонку 'dead' для выводов об ассоциации с выживаемостью некорректно? 
+
+так как только для части данных. анализ эксплораторный , зависимости носят предположительный характер. При высоких зн dim можно бы ожидать что кор истинная
+
+11.	Приведите ваши данные к размерности в две колонки через UMAP. Сравните результаты отображения точек между алгоритмами PCA и UMAP.
+
+UMAP позволяет проанализировать близость строк друг другу и плотнее сгруппировать разрозненные наблюдения на основании теории топологии, при снижении размерности. Из-за свойства сохранять локальные расстояния, метод подоходит для анализа отношния наблюдений/строк, но мало подходит для анализа соотношений колонок.
+
+C использованием tidymodels (информация из лекции)
+
+```{r}
+library(tidymodels)
+library(embed)
+
+umap_p <- recipe (~., data = corr_cl_data) %>% # "тех строка" подаем датасет
+	step_normalize(all_predictors()) %>%  # нормализуем
+  step_umap(all_predictors()) %>% # проводим umap со станд настройками
+	prep() %>% # "тех строка" 
+	juice() # приводим результаты umap к стандартизированному датасету
+
+umap_p %>% 
+	ggplot(aes(UMAP1, UMAP2)) +
+	geom_point (aes(color = cleaned_data$dead), 
+							alpha = 0.5, size = 2) +
+	labs(color = NULL) +
+	theme_minimal()
+
+```
+Альтернативный способ (из книги)
+
+```{r, eva = F} 
+require (umap)
+library (umap)
+
+umap <- umap(corr_cl_data)
+
+df <- data.frame(x = umap$layout[,1],
+                 y = umap$layout[,2],
+                 dead = cleaned_data$dead)
+
+ggplot(df, aes(x, y, colour = dead)) +
+  geom_point()
+
+```
+
+12.	Давайте самостоятельно увидим, что снижение размерности – это группа методов, славящаяся своей неустойчивостью. Измените основные параметры UMAP (n_neighbors и min_dist) и проанализируйте, как это влияет на результаты.
+
+```{r}
+umap_p_1 <- recipe (~., data = corr_cl_data) %>% # "тех строка" подаем датасет
+	step_normalize(all_predictors()) %>%  # нормализуем
+  step_umap(all_predictors(), neighbors = 60 , min_dist = 0.001) %>% # проводим umap со станд настройками
+	prep() %>% # "тех строка" 
+	juice() # приводим результаты umap к стандартизированному датасету
+
+umap_p %>% 
+	ggplot(aes(UMAP1, UMAP2)) +
+	geom_point (aes(color = cleaned_data$dead), 
+							alpha = 0.5, size = 2) +
+	labs(color = NULL) +
+	theme_minimal()
+```
+
+13.	Давайте самостоятельно увидим, что снижение размерности – это группа методов, славящаяся своей неустойчивостью. Пермутируйте 50% и 100% колонки 'bwt'. Проведите PCA и UMAP анализ. Наблюдаете ли вы изменения в куммулятивном проценте объяснённой вариации PCA? В итоговом представлении данных на биплотах для PCA? Отличается ли визуализация данных?
+
+Сделаем новые колонки  на основе данных анализированных ранее. 
+```{r}
+bwt_permut<- corr_cl_data #clone data for analysis 
+bwt_50 <- sample(corr_cl_data$bwt[1:246], 246, replace = FALSE) # сделали вектор на основе первой половину btw без повторов
+
+bwt_permut$bwt_p50 <- c(bwt_50, corr_cl_data$bwt[247:492]) # # пермутировали 50% значений переменной btw без повторов  
+bwt_permut$bwt_p100 <- sample(corr_cl_data$bwt, 492, replace = FALSE) # пермутировали 100% значений переменной btw без повторов
+```
+
+PCA для данных с 50% и 100% пермутированными значениями bwt:
+```{r}
+# PCA анализ
+bwt_50 <- bwt_permut %>% select (!c(bwt, bwt_p100))
+
+bwt_50.pca <- prcomp(bwt_50, 
+                scale = T) # шкалирование нужно так как датафрейм подаем не шкалированный
+summary(bwt_50.pca)
+
+biplot_50 <- ggbiplot(bwt_50.pca, 
+         scale=0, alpha = 0.3, ellipse = TRUE, groups = cleaned_data$dead) +
+         labs(title = "PCA of yield contributing parameters", fill = "dead", color = "dead")
+
+bwt_100 <- bwt_permut %>% select (!c(bwt, bwt_p50))
+
+bwt_100.pca <- prcomp(bwt_100, 
+                scale = T) # шкалирование нужно так как датафрейм подаем не шкалированный
+summary(bwt_100.pca)
+
+biplot_100 <- ggbiplot(bwt_100.pca, 
+         scale=0, alpha = 0.3, ellipse = TRUE, groups = cleaned_data$dead) +
+         labs(title = "PCA of yield contributing parameters", fill = "dead", color = "dead")
+biplot_50
+biplot_100
+
+```
+
+UMAP для данных с 50% и 100% пермутированными значениями bwt:
+
+```{r}
+fun_umap <- function (data) {
+	umap <- recipe (~., data = data) %>% # "тех строка" подаем датасет
+	step_normalize(all_predictors()) %>%  # нормализуем
+  step_umap(all_predictors()) %>% # проводим umap со станд настройками
+	prep() %>% # "тех строка" 
+	juice() # приводим результаты umap к стандартизированному датасету
+
+ umap %>% 
+	ggplot(aes(UMAP1, UMAP2)) +
+	geom_point (aes(color = cleaned_data$dead), 
+							alpha = 0.5, size = 2) +
+	labs(color = NULL) +
+	theme_minimal()
+}
+
+fun_umap(bwt_50)
+fun_umap(bwt_100)
+```
+
+14.	Давайте проведем анализ чувствительности. Проведите анализ, как в шагах 4-6 для оригинального с удалением всех строк с пустыми значениями (т.е. включая колонки с количеством пропущенных значений больше 100), а затем для оригинального датафрейма с импутированием пустых значений средним или медианой. Как отличаются получившиеся результаты? В чем преимущества и недостатки каждого подхода?
+
+```{r}
+
+birth_na_imp<- very_low_birthweight %>% select (hospstay, lowph, pltct, bwt, gest, apg1, dead) %>%
+	                          mutate_if(is.numeric, ~ (replace(., is.na(.), mean(., na.rm = TRUE)))) %>% 
+	                          mutate (id = seq(1,671)) %>% relocate (id)
+
+
+correlation_imp  <- psych::corr.test(birth_na_imp %>% select (!c(id, dead)),
+																		 method = "spearman", adjust = "fdr") # c поправкой на множ. сравнения
+```
+
+Визуализация взаимосвязей
+
+```{r}
+# график матрицы корреляций
+corrplot(corr = correlation_imp$r, 
+         type="upper", order="hclust", method = "number", col = COL2('PiYG'), 
+         p.mat = correlation_imp$p, sig.level = 0.01, insig = "blank")
+
+# network (показывает силу связей и взаимоположение)
+library(corrr)
+net_imp <- birth_na_imp %>% 
+	select (!c(id, dead)) %>% 
+  cor() %>% 
+	network_plot(min_cor = .0)
+net_imp
+```
+
+Иерархическая кластеризацию на этом датафрейме.
+
+```{r}
+
+birth_imp_scaled <- scale(birth_na_imp %>% select (!c(id, dead)))  # шкалирование 
+birth_imp_scaled_dist <- dist(birth_imp_scaled)  # вычисление дистанций 
+
+df_dist_imp.hc <- hclust(d = birth_imp_scaled_dist,
+                     method = "ward.D2")
+fviz_dend(df_dist_imp.hc, horiz = TRUE,
+          cex = 0.6)
+```
+Одновременный график heatmap и иерархической кластеризации. Интерпретация результата.
+
+```{r}
+
+library(pheatmap)
+
+hierarchy_imp <- pheatmap(birth_imp_scaled, 
+         show_rownames = FALSE, 
+         clustering_distance_rows = birth_imp_scaled_dist,
+         clustering_method = "ward.D2", 
+         cutree_rows = 5, #зададим количество кластеров для рядов
+         cutree_cols = length(colnames(birth_imp_scaled)),
+         angle_col = 45, 
+         main = "Dendrograms for clustering rows and columns with heatmap")
+hierarchy_imp 
+```
+
+
+
+```{r}
+titanic %>% mutate(child_or_adult = ifelse(age <= 9 | !is.na(age),"child","adult"))
+
+my_colors %>% 
+  mutate(across(.cols = everything(),
+                .fns = ~ ifelse(is.na(.x) == TRUE, 0, 1)))
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
