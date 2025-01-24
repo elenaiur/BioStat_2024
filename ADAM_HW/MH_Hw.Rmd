@@ -25,19 +25,19 @@ library (lubridate)
 library (stringr)
 
 # data format conversion
-func <- function (x) { date =format(as.Date(x, 
+func <- function (x) {date =format(as.Date(x, 
                                   format = "%Y-%m-%d"), 
                           "%d.%m.%Y")
                       return (date)}
 
 reform_date <- function (x) {
-  function (x) { date =format(as.Date(x, 
+  function (x) {date =format(as.Date(x, 
                                   format = "%Y-%m-%d"), 
                           "%d.%m.%Y")
                       return (date)}
   
   y <- ifelse (str_detect (x, ".*[0-9].*"), func(x), "")
-  return (y) }
+  return (y)}
 ```
 
 Загрузка данных
@@ -56,8 +56,7 @@ TRTP
 TRTPN
 
 ```{r dm}
-mh_subj <- 
-  adsl_list %>% 
+mh_subj <- adsl_list %>% 
   select(STUDYID, SUBJID, USUBJID, TRTP, TRTPN) 
 ```
 
@@ -73,62 +72,65 @@ MHENDTC
 AENDT
 MHENRTPT
 
-```{r}
-mh_dt<- mh_ds %>% select (SUBJID, MHSEQ, MHCAT,MHTERM, MHDECOD, MHBODSYS, MHSTDTC, MHENDTC, MHENRTPT) %>%
+```{r mh}
+mh_dt<- mh_ds %>% select (SUBJID, MHSEQ, MHCAT,MHTERM, MHDECOD, MHBODSYS, 
+                          MHSTDTC, MHENDTC, MHENRTPT) %>%
           # Внесение пропущенныx значения в дату начала и конца исследования
-                                 mutate (ASTDT = case_when (nchar(MHSTDTC) == 4 
-                                                                 ~   paste0(MHSTDTC, "-01-01"),
-                                                   nchar(MHSTDTC) == 7 
-                                                                 ~ paste0(MHSTDTC, "-01"),
-                                                   is.na (MHSTDTC) ~ '',
-                                                   TRUE ~ as.character(MHSTDTC)),
+                   mutate(ASTDT = case_when 
+                         (nchar(MHSTDTC) == 4 ~ paste0(MHSTDTC, "-01-01"),
+                          nchar(MHSTDTC) == 7 ~ paste0(MHSTDTC, "-01"),
+                          is.na (MHSTDTC) ~ '',
+                          TRUE ~ as.character(MHSTDTC)),
                                 
-                                AENDT = case_when (MHENRTPT == 'ONGOING' ~ '',
-                                                  nchar(MHENDTC) == 4 
-                                                                 ~ paste0(MHENDTC, "-01-01"),
-                                                   nchar(MHENDTC) == 7 
-                                                                 ~ paste0(MHENDTC, "-01"),
-                                                   is.na (MHENDTC) ~ ''))  %>%
+                          AENDT = case_when (MHENRTPT == 'ONGOING' ~ '',
+                          nchar(MHENDTC) == 4 ~ paste0(MHENDTC, "-01-01"),
+                          nchar(MHENDTC) == 7~ paste0(MHENDTC, "-01"),
+                          is.na (MHENDTC) ~ ''))  %>%
           # Применение функции для форматирования даты, с сохранением пустых ячеек, где даты нет
-                                mutate(ASTDT = ifelse (str_detect (ASTDT, ".*[0-9].*"), func(ASTDT), ""),
-                                      AENDT = ifelse (str_detect (AENDT, ".*[0-9].*"), func(AENDT), "")) %>%
+                   mutate(ASTDT = ifelse (str_detect (ASTDT, ".*[0-9].*"), func(ASTDT), ""),
+                         ENDT = ifelse (str_detect (AENDT, ".*[0-9].*"), func(AENDT), "")) %>%
           # Создание флагов              
-                                mutate (ASTDTF = case_when (is.na (MHSTDTC) |nchar(MHSTDTC) < 4  ~ "Y",
-                                                    nchar(MHSTDTC) == 4 ~ "M",
-                                                    nchar(MHSTDTC) == 7 ~ "D",
-                                                   TRUE ~ ""),
+                   mutate(ASTDTF = case_when 
+                         (is.na (MHSTDTC) |nchar(MHSTDTC) < 4  ~ "Y",
+                          nchar(MHSTDTC) == 4 ~ "M",
+                          nchar(MHSTDTC) == 7 ~ "D",
+                          TRUE ~ ""),
                                 
-                                AENDTF = case_when (is.na (MHENDTC) |nchar(MHENDTC) < 4  ~ "Y",
-                                                    nchar(MHENDTC) == 4 ~ "M",
-                                                    nchar(MHENDTC) == 7 ~ "D",
-                                                    TRUE ~ ""), 
+                         AENDTF = case_when 
+                         (is.na (MHENDTC) |nchar(MHENDTC) < 4  ~ "Y",
+                         nchar(MHENDTC) == 4 ~ "M",
+                         nchar(MHENDTC) == 7 ~ "D",
+                         TRUE ~ ""), 
         
-                                MHENRF = ifelse (MHENRTPT == 'ONGOING', 'ONGOING', ""))
+                         MHENRF = ifelse (MHENRTPT == 'ONGOING', 'ONGOING', ""))
                                 
 ```
 
-```{r}
-ADMH <- left_join(mh_dt, mh_subj) %>% select (STUDYID,
-                                             USUBJID,
-                                             TRTP,
-                                             TRTPN,
-                                             MHSEQ,
-                                             MHCAT,
-                                             MHTERM, 
-                                             MHDECOD, 
-                                             MHBODSYS,
-                                             MHSTDTC,
-                                             ASTDT,
-                                             ASTDTF,
-                                             MHENDTC,
-                                             AENDT,
-                                             AENDTF,
-                                             MHENRTPT,
-                                             MHENRF) %>% filter (!is.na (MHTERM))
+```{r admh}
+ADMH <- left_join(mh_dt, mh_subj) %>% 
+  select (STUDYID,
+          USUBJID,
+          TRTP,
+          TRTPN,
+          MHSEQ,
+          MHCAT,
+          MHTERM, 
+          MHDECOD, 
+          MHBODSYS,
+          MHSTDTC,
+          ASTDT,
+          ASTDTF,
+          MHENDTC,
+          AENDT,
+          AENDTF,
+          MHENRTPT,
+          MHENRF) %>% 
+   filter(!is.na(MHTERM) & MHCAT == "Medical History") %>%
+   mutate(across(c(TRTPN, MHSEQ), as.integer))
 ADMH
 ```
 
 ```{r}
-write.xlsx(ADMH, "./ADaM-like/ADHM.xlsx")
+write.xlsx(ADMH, "./ADaM-like/ADMH.xlsx")
 ```
 

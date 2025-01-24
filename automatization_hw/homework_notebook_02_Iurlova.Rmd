@@ -67,7 +67,7 @@ write.csv(outliers, "outliers.csv", row.names = FALSE)
 
 cleaned_data <- food %>% mutate (Category= as.factor(Category), `Nutrient_Bank_Number`= as.factor(`Nutrient_Bank_Number`)) %>% arrange(desc(Carbohydrate)) %>% filter (Category %in% c("Rice", "Cookie"))
 cleaned_data$Category <- droplevels(cleaned_data$Category) # удалим убранные уровни фактора 
-
+?quantile
 ```
 
 # Сколько осталось переменных?
